@@ -1,0 +1,56 @@
+{
+	"name": "insight-swarm",
+	"version": "1.0.0",
+	"type": "module",
+	"engines": {
+		"node": ">=22"
+	},
+	"scripts": {
+		"start": "node --env-file=.env --import tsx backend/serve.ts",
+		"dev": "node --env-file=.env --import tsx --watch backend/serve.ts",
+		"dev:frontend": "pnpm --dir frontend exec vite",
+		"dev:full": "pnpm kill-ports && npx concurrently -k -n api,web -c blue,green 'pnpm dev' 'pnpm dev:frontend'",
+		"build": "tsc",
+		"build:frontend": "pnpm --dir frontend exec vite build",
+		"typecheck": "tsc --noEmit",
+		"db:init": "node --env-file=.env --import tsx backend/infrastructure/db/cli.ts init",
+		"db:reset": "node --env-file=.env --import tsx backend/infrastructure/db/cli.ts reset",
+		"db:shell": "docker exec -it $(docker ps -qf ancestor=pgvector/pgvector:pg16-alpine) psql -U mts -d insight_swarm",
+		"kill-ports": "lsof -ti:3000,5173 | xargs kill -9 2>/dev/null || true",
+		"clean": "rm -rf dist frontend/dist",
+		"infra": "docker compose -f docker-compose.dev.yml up -d",
+		"infra:down": "docker compose -f docker-compose.dev.yml down -v",
+		"infra:logs": "docker compose -f docker-compose.dev.yml logs -f --tail=50",
+		"infra:status": "docker compose -f docker-compose.dev.yml ps",
+		"deploy": "docker compose up -d --build --remove-orphans",
+		"deploy:down": "docker compose down",
+		"lint": "biome lint .",
+		"lint:fix": "biome lint --write .",
+		"format": "biome format .",
+		"format:fix": "biome format --write .",
+		"check": "biome check .",
+		"check:fix": "biome check --write ."
+	},
+	"dependencies": {
+		"@google/adk": "^0.3.0",
+		"@google/genai": "^1.41.0",
+		"@hono/node-server": "^1.19.9",
+		"amqplib": "^0.10.9",
+		"hono": "^4.11.9",
+		"pg": "^8.18.0",
+		"zod": "^4.3.6"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^2.4.2",
+		"@types/amqplib": "^0.10.8",
+		"@types/pg": "^8.16.0",
+		"concurrently": "^9.2.1",
+		"tsx": "^4.19.0",
+		"typescript": "^5.7.0"
+	},
+	"pnpm": {
+		"onlyBuiltDependencies": [
+			"esbuild"
+		]
+	}
+}

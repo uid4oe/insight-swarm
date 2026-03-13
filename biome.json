@@ -1,0 +1,75 @@
+{
+	"$schema": "https://biomejs.dev/schemas/2.4.2/schema.json",
+	"vcs": {
+		"enabled": true,
+		"clientKind": "git",
+		"useIgnoreFile": true
+	},
+	"files": {
+		"includes": ["backend/**", "frontend/src/**", "*.json"]
+	},
+	"formatter": {
+		"enabled": true,
+		"indentStyle": "tab",
+		"indentWidth": 2,
+		"lineWidth": 120
+	},
+	"css": {
+		"parser": {
+			"cssModules": true,
+			"tailwindDirectives": true
+		}
+	},
+	"javascript": {
+		"formatter": {
+			"quoteStyle": "single",
+			"trailingCommas": "all",
+			"semicolons": "always",
+			"arrowParentheses": "always"
+		}
+	},
+	"linter": {
+		"enabled": true,
+		"rules": {
+			"recommended": true,
+			"suspicious": {
+				"noExplicitAny": "error",
+				"noConsole": "off",
+				"noArrayIndexKey": "warn"
+			},
+			"correctness": {
+				"useExhaustiveDependencies": "warn",
+				"noUnusedImports": "error",
+				"noUnusedVariables": "error"
+			},
+			"style": {
+				"noNonNullAssertion": "warn",
+				"useImportType": "error",
+				"noUselessElse": "off",
+				"useDefaultParameterLast": "off",
+				"useNodejsImportProtocol": "error",
+				"useTemplate": "warn"
+			},
+			"a11y": {
+				"useButtonType": "warn",
+				"useKeyWithClickEvents": "warn",
+				"noStaticElementInteractions": "warn",
+				"useSemanticElements": "warn",
+				"noAutofocus": "off"
+			},
+			"complexity": {
+				"noBannedTypes": "warn"
+			}
+		}
+	},
+	"overrides": [
+		{
+			"includes": ["frontend/**"],
+			"javascript": {
+				"formatter": {
+					"quoteStyle": "double"
+				}
+			}
+		}
+	]
+}
