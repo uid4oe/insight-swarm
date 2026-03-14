@@ -118,6 +118,7 @@ function CompletedView({
 					onOpenFinding={onOpenFindingById}
 					onOpenAgent={onOpenAgent}
 					onToggleAgent={onToggleAgent}
+					summaryMode
 				/>
 			</div>
 		</div>

@@ -116,7 +116,7 @@ export function TaskHeader({
 		<div className="flex items-center justify-between border-b border-border/60 px-6 py-3.5">
 			<div className="min-w-0 flex-1 mr-4">
 				<h2 className="text-[15px] font-medium tracking-tight text-text-primary truncate">{title}</h2>
-				{prompt && prompt !== title && (
+				{prompt && prompt.toLowerCase().trim() !== title.toLowerCase().trim() && status !== "completed" && (
 					<p className="text-meta mt-0.5 max-w-2xl truncate opacity-60" title={prompt}>
 						{prompt}
 					</p>
