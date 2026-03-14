@@ -1,17 +1,99 @@
 import Graph from "graphology";
+import forceAtlas2 from "graphology-layout-forceatlas2";
 import { GRAPH_COLORS, RELATIONSHIP_COLORS } from "../../lib/constants";
 import type { Connection, Finding, InvestmentThesis } from "../../lib/types";
 
-// ── Layout constants ─────────────────────────────────────────────────────────
+// ── ForceAtlas2 settings ────────────────────────────────────────────────────
 
-const THESIS_RADIUS = 700; // how far apart thesis hubs are placed
-const EVIDENCE_ORBIT = 200; // how far evidence findings sit from their thesis
-const PERIPHERY_RADIUS = 950; // where unattached findings go
-const PERIPHERY_SPREAD = 80; // jitter within periphery clusters
+const FA2_ITERATIONS = 800;
+const FA2_SETTINGS = {
+	gravity: 0.001,
+	scalingRatio: 600,
+	strongGravityMode: false,
+	barnesHutOptimize: true,
+	barnesHutTheta: 0.4,
+	slowDown: 10,
+	adjustSizes: true,
+	linLogMode: true,
+	outboundAttractionDistribution: true,
+	edgeWeightInfluence: 1.5,
+};
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+// ── Post-layout: minimum spacing ────────────────────────────────────────────
 
-/** Place N items evenly around a circle, returning { x, y } for each index */
+const LAYOUT_SCALE = 2.5; // uniform scale-up applied after FA2
+const MIN_NODE_DISTANCE = 250; // minimum px between any two node centers (after scaling)
+const SPREAD_PASSES = 12;
+
+/**
+ * 1. Scale the entire layout outward from centroid.
+ * 2. Push apart any nodes closer than MIN_NODE_DISTANCE.
+ */
+function spreadLayout(graph: Graph): void {
+	const nodes: { id: string; x: number; y: number; isThesis: boolean }[] = [];
+	graph.forEachNode((id, attrs) => {
+		nodes.push({ id, x: attrs.x, y: attrs.y, isThesis: attrs.nodeType === "thesis" });
+	});
+	if (nodes.length === 0) return;
+
+	// Step 1: uniform scale-up from centroid
+	let cx = 0;
+	let cy = 0;
+	for (const n of nodes) { cx += n.x; cy += n.y; }
+	cx /= nodes.length;
+	cy /= nodes.length;
+	for (const n of nodes) {
+		n.x = cx + (n.x - cx) * LAYOUT_SCALE;
+		n.y = cy + (n.y - cy) * LAYOUT_SCALE;
+	}
+
+	// Step 2: push apart overlapping pairs
+	for (let pass = 0; pass < SPREAD_PASSES; pass++) {
+		for (let i = 0; i < nodes.length; i++) {
+			for (let j = i + 1; j < nodes.length; j++) {
+				const a = nodes[i];
+				const b = nodes[j];
+				const dx = b.x - a.x;
+				const dy = b.y - a.y;
+				const dist = Math.sqrt(dx * dx + dy * dy);
+
+				const bothThesis = a.isThesis && b.isThesis;
+				const minDist = bothThesis
+					? MIN_NODE_DISTANCE * 3.5
+					: (a.isThesis || b.isThesis)
+						? MIN_NODE_DISTANCE * 2.5
+						: MIN_NODE_DISTANCE;
+
+				if (dist < minDist && dist > 0) {
+					// Push the full overlap distance each pass (not half)
+					const push = minDist - dist;
+					const nx = dx / dist;
+					const ny = dy / dist;
+					const aWeight = a.isThesis ? 0.15 : 0.5;
+					const bWeight = b.isThesis ? 0.15 : 0.5;
+					a.x -= nx * push * aWeight;
+					a.y -= ny * push * aWeight;
+					b.x += nx * push * bWeight;
+					b.y += ny * push * bWeight;
+				} else if (dist === 0) {
+					const angle = Math.random() * Math.PI * 2;
+					a.x += Math.cos(angle) * minDist;
+					a.y += Math.sin(angle) * minDist;
+				}
+			}
+		}
+	}
+
+	// Write back
+	for (const n of nodes) {
+		graph.setNodeAttribute(n.id, "x", n.x);
+		graph.setNodeAttribute(n.id, "y", n.y);
+	}
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
+/** Place N items evenly around a circle */
 function circlePosition(
 	index: number,
 	total: number,
@@ -24,7 +106,71 @@ function circlePosition(
 	return { x: cx + Math.cos(angle) * radius, y: cy + Math.sin(angle) * radius };
 }
 
-// ── Main builder ─────────────────────────────────────────────────────────────
+/** Seed initial positions to give ForceAtlas2 a head start */
+function seedPositions(
+	graph: Graph,
+	findings: Finding[],
+	theses: InvestmentThesis[],
+	findingMap: Map<string, Finding>,
+): void {
+	const findingToTheses = new Map<string, string[]>();
+	for (const thesis of theses) {
+		for (const e of thesis.evidence) {
+			const arr = findingToTheses.get(e.finding_id) ?? [];
+			arr.push(`thesis:${thesis.id}`);
+			findingToTheses.set(e.finding_id, arr);
+		}
+	}
+
+	const THESIS_SPREAD = 2000;
+	const thesisPositions = new Map<string, { x: number; y: number }>();
+	for (let i = 0; i < theses.length; i++) {
+		const nodeId = `thesis:${theses[i].id}`;
+		const pos = circlePosition(i, theses.length, 0, 0, theses.length === 1 ? 0 : THESIS_SPREAD);
+		thesisPositions.set(nodeId, pos);
+		if (graph.hasNode(nodeId)) {
+			graph.setNodeAttribute(nodeId, "x", pos.x);
+			graph.setNodeAttribute(nodeId, "y", pos.y);
+		}
+	}
+
+	for (const f of findings) {
+		if (!graph.hasNode(f.id)) continue;
+		const linkedTheses = findingToTheses.get(f.id);
+		if (linkedTheses && linkedTheses.length > 0) {
+			let cx = 0;
+			let cy = 0;
+			for (const tId of linkedTheses) {
+				const tp = thesisPositions.get(tId) ?? { x: 0, y: 0 };
+				cx += tp.x;
+				cy += tp.y;
+			}
+			cx /= linkedTheses.length;
+			cy /= linkedTheses.length;
+			const jitter = 450 + Math.random() * 500;
+			const angle = Math.random() * Math.PI * 2;
+			graph.setNodeAttribute(f.id, "x", cx + Math.cos(angle) * jitter);
+			graph.setNodeAttribute(f.id, "y", cy + Math.sin(angle) * jitter);
+		} else {
+			const angle = Math.random() * Math.PI * 2;
+			const r = 1800 + Math.random() * 800;
+			graph.setNodeAttribute(f.id, "x", Math.cos(angle) * r);
+			graph.setNodeAttribute(f.id, "y", Math.sin(angle) * r);
+		}
+	}
+}
+
+// ── Edge color helpers ──────────────────────────────────────────────────────
+
+/** Make a hex color semi-transparent by returning an rgba string */
+function withAlpha(hex: string, alpha: number): string {
+	const r = Number.parseInt(hex.slice(1, 3), 16);
+	const g = Number.parseInt(hex.slice(3, 5), 16);
+	const b = Number.parseInt(hex.slice(5, 7), 16);
+	return `rgba(${r},${g},${b},${alpha})`;
+}
+
+// ── Main builder ────────────────────────────────────────────────────────────
 
 export function buildGraph(
 	findings: Finding[],
@@ -38,175 +184,16 @@ export function buildGraph(
 	const findingMap = new Map<string, Finding>();
 	for (const f of findings) findingMap.set(f.id, f);
 
-	// ── 1. Compute thesis positions (hubs) ─────────────────────────────────
-	const thesisPositions = new Map<string, { x: number; y: number }>();
-	for (let i = 0; i < theses.length; i++) {
-		const pos = circlePosition(i, theses.length, 0, 0, theses.length === 1 ? 0 : THESIS_RADIUS);
-		thesisPositions.set(theses[i].id, pos);
-	}
-
-	// ── 2. Map findings → which theses reference them ──────────────────────
-	const findingToTheses = new Map<string, string[]>(); // finding_id → thesis_ids
-	for (const thesis of theses) {
-		for (const e of thesis.evidence) {
-			const arr = findingToTheses.get(e.finding_id) ?? [];
-			arr.push(thesis.id);
-			findingToTheses.set(e.finding_id, arr);
-		}
-	}
-
-	// ── 3. Build connection neighbor map for connected-but-no-thesis findings
-	const connectionNeighbors = new Map<string, Set<string>>();
-	for (const c of connections) {
-		if (!findingMap.has(c.from_finding_id) || !findingMap.has(c.to_finding_id)) continue;
-		if (!connectionNeighbors.has(c.from_finding_id)) connectionNeighbors.set(c.from_finding_id, new Set());
-		if (!connectionNeighbors.has(c.to_finding_id)) connectionNeighbors.set(c.to_finding_id, new Set());
-		connectionNeighbors.get(c.from_finding_id)!.add(c.to_finding_id);
-		connectionNeighbors.get(c.to_finding_id)!.add(c.from_finding_id);
-	}
-
-	// ── 4. Classify findings ───────────────────────────────────────────────
-	// Group A: evidence for thesis(es)
-	// Group B: connected to other findings but not thesis evidence
-	// Group C: isolated (no connections, no thesis)
-
-	const groupA: Finding[] = []; // has thesis
-	const groupB: Finding[] = []; // has connections but no thesis
-	const groupC: Finding[] = []; // isolated
-
+	// ── 1. Add all finding nodes ────────────────────────────────────────────
 	for (const f of findings) {
-		if (findingToTheses.has(f.id)) {
-			groupA.push(f);
-		} else if (connectionNeighbors.has(f.id)) {
-			groupB.push(f);
-		} else {
-			groupC.push(f);
-		}
-	}
-
-	// ── 5. Position Group A: evidence findings around their thesis hubs ────
-	// Count how many findings per thesis for even distribution
-	const thesisEvidenceCount = new Map<string, number>();
-	const findingPositions = new Map<string, { x: number; y: number }>();
-
-	for (const f of groupA) {
-		const thesisIds = findingToTheses.get(f.id)!;
-
-		if (thesisIds.length === 1) {
-			// Single thesis → orbit around it
-			const tId = thesisIds[0];
-			const tPos = thesisPositions.get(tId)!;
-			const idx = thesisEvidenceCount.get(tId) ?? 0;
-			thesisEvidenceCount.set(tId, idx + 1);
-
-			// We don't know total yet, so we'll use a golden-angle spiral
-			const goldenAngle = 2.399963; // ~137.5°
-			const angle = idx * goldenAngle - Math.PI / 2;
-			const r = EVIDENCE_ORBIT + (idx > 5 ? (idx - 5) * 35 : 0);
-			findingPositions.set(f.id, {
-				x: tPos.x + Math.cos(angle) * r,
-				y: tPos.y + Math.sin(angle) * r,
-			});
-		} else {
-			// Multiple theses → position at centroid of those theses
-			let cx = 0;
-			let cy = 0;
-			for (const tId of thesisIds) {
-				const tPos = thesisPositions.get(tId)!;
-				cx += tPos.x;
-				cy += tPos.y;
-			}
-			cx /= thesisIds.length;
-			cy /= thesisIds.length;
-
-			// Add small offset to avoid stacking shared findings
-			const sharedIdx = groupA.filter(
-				(g) => g.id !== f.id && (findingToTheses.get(g.id)?.length ?? 0) > 1,
-			).indexOf(f);
-			const jitter = (sharedIdx + 1) * 30;
-			const jAngle = sharedIdx * 2.399963;
-			findingPositions.set(f.id, {
-				x: cx + Math.cos(jAngle) * jitter,
-				y: cy + Math.sin(jAngle) * jitter,
-			});
-		}
-	}
-
-	// ── 6. Position Group B: connected findings near their partners ────────
-	// Place near the average position of their already-positioned neighbors,
-	// or if none are positioned yet, place in a ring between theses and periphery
-	const groupBUnplaced: Finding[] = [];
-
-	for (const f of groupB) {
-		const neighbors = connectionNeighbors.get(f.id)!;
-		let cx = 0;
-		let cy = 0;
-		let count = 0;
-		for (const nId of neighbors) {
-			const pos = findingPositions.get(nId);
-			if (pos) {
-				cx += pos.x;
-				cy += pos.y;
-				count++;
-			}
-		}
-		if (count > 0) {
-			cx /= count;
-			cy /= count;
-			// Offset slightly so they don't stack on neighbors
-			const angle = Math.atan2(cy, cx) + Math.PI / 6;
-			findingPositions.set(f.id, {
-				x: cx + Math.cos(angle) * 60,
-				y: cy + Math.sin(angle) * 60,
-			});
-		} else {
-			groupBUnplaced.push(f);
-		}
-	}
-
-	// Place remaining group B in an intermediate ring
-	const midRadius = (THESIS_RADIUS + PERIPHERY_RADIUS) / 2;
-	for (let i = 0; i < groupBUnplaced.length; i++) {
-		const f = groupBUnplaced[i];
-		const pos = circlePosition(i, groupBUnplaced.length, 0, 0, midRadius);
-		findingPositions.set(f.id, pos);
-	}
-
-	// ── 7. Position Group C: isolated findings on periphery by agent ───────
-	const agentGroups = new Map<string, Finding[]>();
-	for (const f of groupC) {
-		const arr = agentGroups.get(f.agent_id) ?? [];
-		arr.push(f);
-		agentGroups.set(f.agent_id, arr);
-	}
-	const agentKeys = [...agentGroups.keys()];
-	let peripheryIdx = 0;
-	const totalPeriphery = groupC.length;
-	for (let a = 0; a < agentKeys.length; a++) {
-		const agentFindings = agentGroups.get(agentKeys[a])!;
-		for (const f of agentFindings) {
-			const pos = circlePosition(peripheryIdx, totalPeriphery, 0, 0, PERIPHERY_RADIUS);
-			// Add small agent-group offset so same-agent nodes cluster slightly
-			const groupAngle = (a / agentKeys.length) * Math.PI * 2;
-			findingPositions.set(f.id, {
-				x: pos.x + Math.cos(groupAngle) * PERIPHERY_SPREAD,
-				y: pos.y + Math.sin(groupAngle) * PERIPHERY_SPREAD,
-			});
-			peripheryIdx++;
-		}
-	}
-
-	// ── 8. Add all finding nodes to graph ──────────────────────────────────
-	for (const f of findings) {
-		const pos = findingPositions.get(f.id) ?? { x: 0, y: 0 };
-		const findingSize = Math.max(6, Math.min(6 + f.confidence * 10, 18));
+		const findingSize = Math.max(8, Math.min(8 + f.confidence * 14, 22));
 
 		graph.addNode(f.id, {
-			x: pos.x,
-			y: pos.y,
+			x: 0,
+			y: 0,
 			size: findingSize,
 			color: agentColorFn(f.agent_id),
-			label: f.title.length > 40 ? `${f.title.slice(0, 38)}...` : f.title,
+			label: f.title.length > 36 ? `${f.title.slice(0, 34)}...` : f.title,
 			type: "circle",
 			nodeType: "finding",
 			agentId: f.agent_id,
@@ -221,7 +208,7 @@ export function buildGraph(
 		nodeIds.add(f.id);
 	}
 
-	// ── 9. Connection edges ────────────────────────────────────────────────
+	// ── 2. Connection edges (semi-transparent to reduce visual noise) ───────
 	for (const c of connections) {
 		if (!nodeIds.has(c.from_finding_id) || !nodeIds.has(c.to_finding_id)) continue;
 		const edgeKey = `${c.from_finding_id}->${c.to_finding_id}`;
@@ -231,20 +218,21 @@ export function buildGraph(
 		const fromF = findingMap.get(c.from_finding_id);
 		const toF = findingMap.get(c.to_finding_id);
 		const isCrossAgent = !!(fromF && toF && fromF.agent_id !== toF.agent_id);
-		const crossMultiplier = isCrossAgent ? 1.2 : 1;
-		const baseSize = isContradicts
-			? Math.max(c.strength * 2, 1.2)
-			: Math.max(c.strength * 1.2, 0.6);
+		const baseSize = isContradicts ? 1.5 : 0.8;
+		const rawColor = RELATIONSHIP_COLORS[c.relationship] ?? GRAPH_COLORS.defaultNode;
+		const edgeAlpha = isContradicts ? 0.7 : 0.4;
+
 		graph.addEdgeWithKey(edgeKey, c.from_finding_id, c.to_finding_id, {
-			size: baseSize * crossMultiplier,
-			color: RELATIONSHIP_COLORS[c.relationship] ?? GRAPH_COLORS.defaultNode,
+			size: baseSize,
+			color: withAlpha(rawColor, edgeAlpha),
 			type: "arrow",
 			isContradicts,
 			isCrossAgent,
+			weight: isContradicts ? 0.2 : c.strength * 0.6,
 		});
 	}
 
-	// ── 10. Thesis nodes ───────────────────────────────────────────────────
+	// ── 3. Thesis nodes ─────────────────────────────────────────────────────
 	for (let i = 0; i < theses.length; i++) {
 		const thesis = theses[i];
 		const thesisNodeId = `thesis:${thesis.id}`;
@@ -257,10 +245,8 @@ export function buildGraph(
 		const emergence = agents.size;
 		const isHighEmergence = emergence >= 3;
 
-		const tPos = thesisPositions.get(thesis.id) ?? { x: 0, y: 0 };
-
-		const MIN_THESIS_SIZE = 12;
-		const MAX_THESIS_SIZE = 32;
+		const MIN_THESIS_SIZE = 20;
+		const MAX_THESIS_SIZE = 42;
 		const clampedConf = Math.max(0, Math.min(1, thesis.confidence));
 		const size = MIN_THESIS_SIZE + clampedConf * (MAX_THESIS_SIZE - MIN_THESIS_SIZE);
 
@@ -277,11 +263,11 @@ export function buildGraph(
 		];
 
 		graph.addNode(thesisNodeId, {
-			x: tPos.x,
-			y: tPos.y,
+			x: 0,
+			y: 0,
 			size,
 			color: isHighEmergence ? GRAPH_COLORS.thesisHighEmergence : GRAPH_COLORS.thesis,
-			label: thesis.title.length > 45 ? `${thesis.title.slice(0, 43)}...` : thesis.title,
+			label: thesis.title.length > 42 ? `${thesis.title.slice(0, 40)}...` : thesis.title,
 			type: "diamond",
 			nodeType: "thesis",
 			emergence,
@@ -297,23 +283,31 @@ export function buildGraph(
 		});
 		nodeIds.add(thesisNodeId);
 
-		// Evidence edges
+		// Evidence edges — semi-transparent, weighted to keep clusters together
 		for (const e of thesis.evidence) {
 			if (!nodeIds.has(e.finding_id)) continue;
 			const edgeKey = `${e.finding_id}->thesis:${thesis.id}`;
 			if (graph.hasEdge(edgeKey)) continue;
 
 			const sourceFinding = findingMap.get(e.finding_id);
-			const edgeColor = sourceFinding
+			const rawColor = sourceFinding
 				? agentColorFn(sourceFinding.agent_id)
 				: RELATIONSHIP_COLORS.supports;
 
 			graph.addEdgeWithKey(edgeKey, e.finding_id, thesisNodeId, {
 				size: 1.0,
-				color: edgeColor,
+				color: withAlpha(rawColor, 0.45),
 				type: "arrow",
+				weight: 1.5,
 			});
 		}
+	}
+
+	// ── 4. Layout: seed → ForceAtlas2 → enforce minimum spacing ─────────────
+	if (graph.order > 0) {
+		seedPositions(graph, findings, theses, findingMap);
+		forceAtlas2.assign(graph, { iterations: FA2_ITERATIONS, settings: FA2_SETTINGS });
+		spreadLayout(graph);
 	}
 
 	return graph;

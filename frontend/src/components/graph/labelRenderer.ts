@@ -66,22 +66,23 @@ export function drawLabel(
 
 	if (!data.label) return;
 
-	const fontSize = isThesis ? settings.labelSize + 3 : settings.labelSize + 1;
+	const fontSize = isThesis ? settings.labelSize + 4 : settings.labelSize + 1;
 	const font = settings.labelFont;
 	const weight = isThesis ? "600" : "500";
-	const labelColor = isThesis ? "#e4e4e8" : "rgba(180,185,200,0.75)";
+	const labelColor = isThesis ? "#f0f0f4" : "rgba(200,205,220,0.88)";
 
 	context.font = `${weight} ${fontSize}px ${font}`;
-	const maxChars = isThesis ? 30 : 24;
+	const maxChars = isThesis ? 26 : 20;
 	const lines = wrapLabel(data.label, maxChars);
 	const lineHeight = fontSize * 1.25;
 	const xOffset = data.size + 8;
 	const yBase = data.y - ((lines.length - 1) * lineHeight) / 2;
 
 	// Text shadow for readability on dark backgrounds
-	context.fillStyle = "rgba(0,0,0,0.6)";
+	context.fillStyle = "rgba(0,0,0,0.75)";
 	for (let i = 0; i < lines.length; i++) {
 		context.fillText(lines[i], data.x + xOffset + 1, yBase + i * lineHeight + 1);
+		context.fillText(lines[i], data.x + xOffset - 1, yBase + i * lineHeight);
 	}
 	context.fillStyle = labelColor;
 	for (let i = 0; i < lines.length; i++) {
