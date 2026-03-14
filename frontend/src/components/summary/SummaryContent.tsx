@@ -62,6 +62,8 @@ function summaryToText(s: StructuredSummary): string {
 export function SummaryContent({ summary, agentMeta, theses: realTheses, onOpenThesis }: Props) {
 	const agentMap = useMemo(() => buildAgentMap(agentMeta), [agentMeta]);
 	const setHighlight = useAppStore((s) => s.setHighlightedThesis);
+	const setSelectedGraphThesis = useAppStore((s) => s.setSelectedGraphThesis);
+	const selectedGraphThesisId = useAppStore((s) => s.selectedGraphThesisId);
 	const [copied, setCopied] = useState(false);
 
 	const handleCopy = useCallback(() => {
@@ -84,9 +86,26 @@ export function SummaryContent({ summary, agentMeta, theses: realTheses, onOpenT
 		return map;
 	}, [summary.theses, realTheses]);
 
+	// Map thesis ID → graph label (T1, T2, ...) matching graphBuilder order
+	const thesisGraphLabel = useMemo(() => {
+		const map = new Map<string, string>();
+		if (realTheses) {
+			for (let i = 0; i < realTheses.length; i++) {
+				map.set(realTheses[i].id, `T${i + 1}`);
+			}
+		}
+		return map;
+	}, [realTheses]);
+
 	const getThesisId = (title: string): string | undefined => thesisIdByTitle.get(title);
 
 	const handleThesisClick = (title: string) => {
+		const thesisId = thesisIdByTitle.get(title);
+		if (thesisId) setSelectedGraphThesis(thesisId);
+	};
+
+	const handleThesisDetailClick = (e: React.MouseEvent, title: string) => {
+		e.stopPropagation();
 		if (!onOpenThesis) return;
 		const thesisId = thesisIdByTitle.get(title);
 		if (thesisId) onOpenThesis(thesisId);
@@ -132,32 +151,57 @@ export function SummaryContent({ summary, agentMeta, theses: realTheses, onOpenT
 							const consensusColor = CONSENSUS_COLORS[o.consensus];
 							const realThesis = realTheses?.find((rt) => rt.title === o.title || rt.id === o.id);
 							const challengeCount = realThesis?.votes.filter((v) => v.vote === "challenge").length ?? 0;
+							const thesisId = getThesisId(o.title);
+							const isSelected = thesisId != null && thesisId === selectedGraphThesisId;
 							return (
 								<button
 									type="button"
 									key={o.id ?? o.title}
-									className="w-full text-left rounded-md px-3 py-2.5 cursor-pointer transition-colors hover:bg-surface/60"
+									className={`w-full text-left rounded-md px-3 py-2.5 cursor-pointer transition-colors ${
+										isSelected
+											? "bg-accent-strong/10 border border-accent-strong/30"
+											: "hover:bg-surface/60 border border-transparent"
+									}`}
 									onClick={() => handleThesisClick(o.title)}
 									onMouseEnter={() => {
-										const id = getThesisId(o.title);
-										if (id) setHighlight(id);
+										if (thesisId && !selectedGraphThesisId) setHighlight(thesisId);
 									}}
-									onMouseLeave={() => setHighlight(null)}
+									onMouseLeave={() => {
+										if (!selectedGraphThesisId) setHighlight(null);
+									}}
 								>
-									<div className="flex items-start justify-between gap-2">
+									<div className="flex items-start gap-2">
+										{thesisId && thesisGraphLabel.get(thesisId) && (
+											<span className="shrink-0 mt-0.5 rounded bg-thesis/20 px-2 py-1 font-mono text-[13px] font-bold text-thesis">
+												{thesisGraphLabel.get(thesisId)}
+											</span>
+										)}
 										<div className="min-w-0 flex-1">
-											<div className="flex items-center gap-1.5 flex-wrap">
-												<span className="text-[13px] font-medium text-text-primary leading-snug">{o.title}</span>
-												<span className={`pill text-[10px] font-semibold ${consensusColor}`}>{o.consensus}</span>
-												{challengeCount > 0 && (
-													<span className="pill text-[10px] font-semibold pill-error">
-														⚡ {challengeCount} {challengeCount === 1 ? "challenge" : "challenges"}
-													</span>
-												)}
+											<div className="flex items-start justify-between gap-2">
+												<div className="min-w-0 flex-1">
+													<div className="flex items-center gap-1.5 flex-wrap">
+														<span className="text-[13px] font-medium text-text-primary leading-snug">{o.title}</span>
+														<span className={`pill text-[10px] font-semibold ${consensusColor}`}>{o.consensus}</span>
+														{challengeCount > 0 && (
+															<span className="pill text-[10px] font-semibold pill-error">
+																⚡ {challengeCount} {challengeCount === 1 ? "challenge" : "challenges"}
+															</span>
+														)}
+														{isSelected && (
+															<button
+																type="button"
+																className="pill text-[10px] font-semibold text-accent-strong bg-accent-strong/15 cursor-pointer hover:bg-accent-strong/25 border-none"
+																onClick={(e) => handleThesisDetailClick(e, o.title)}
+															>
+																view details
+															</button>
+														)}
+													</div>
+													<div className="mt-0.5 text-body text-text-tertiary leading-snug">{o.oneLiner}</div>
+												</div>
+												<ConfidenceBar value={o.confidence} />
 											</div>
-											<div className="mt-0.5 text-body text-text-tertiary leading-snug">{o.oneLiner}</div>
 										</div>
-										<ConfidenceBar value={o.confidence} />
 									</div>
 								</button>
 							);

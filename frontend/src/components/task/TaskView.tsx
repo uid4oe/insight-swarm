@@ -118,7 +118,6 @@ function CompletedView({
 					onOpenFinding={onOpenFindingById}
 					onOpenAgent={onOpenAgent}
 					onToggleAgent={onToggleAgent}
-					summaryMode
 				/>
 			</div>
 		</div>
@@ -170,16 +169,16 @@ function RunningView({
 					onToggleAgent={onToggleAgent}
 				/>
 				<div className="relative min-h-0 flex-1 px-5 py-4" ref={bodyRef}>
-				<KnowledgeGraph
-					key={taskId}
-					findings={findings}
-					connections={connections}
-					theses={theses}
-					agentMeta={agentMeta}
-					hiddenAgents={hiddenAgents}
-					onOpenThesis={onOpenThesis}
-					onOpenFinding={onOpenFindingById}
-				/>
+					<KnowledgeGraph
+						key={taskId}
+						findings={findings}
+						connections={connections}
+						theses={theses}
+						agentMeta={agentMeta}
+						hiddenAgents={hiddenAgents}
+						onOpenThesis={onOpenThesis}
+						onOpenFinding={onOpenFindingById}
+					/>
 				</div>
 			</div>
 			{/* Sidebar — theses + activity */}

@@ -134,14 +134,16 @@ export function mergeGraph(
 	}
 
 	// Upsert finding nodes
-	for (const f of findings) {
+	for (let fi = 0; fi < findings.length; fi++) {
+		const f = findings[fi];
 		const findingSize = Math.max(8, Math.min(8 + f.confidence * 14, 22));
+		const findingLabel = String(fi + 1);
 
 		if (existing.hasNode(f.id)) {
 			existing.mergeNodeAttributes(f.id, {
 				size: findingSize,
 				color: agentColorFn(f.agent_id),
-				label: f.title.length > 36 ? `${f.title.slice(0, 34)}...` : f.title,
+				label: findingLabel,
 				confidence: f.confidence,
 				category: f.category,
 				fullTitle: f.title,
@@ -170,7 +172,7 @@ export function mergeGraph(
 				y,
 				size: findingSize,
 				color: agentColorFn(f.agent_id),
-				label: f.title.length > 36 ? `${f.title.slice(0, 34)}...` : f.title,
+				label: findingLabel,
 				type: "circle",
 				nodeType: "finding",
 				agentId: f.agent_id,
@@ -213,11 +215,13 @@ export function mergeGraph(
 			...new Set(thesis.evidence.map((e) => findingMap.get(e.finding_id)?.agent_id).filter(Boolean)),
 		];
 
+		const thesisLabel = `T${i + 1}`;
+
 		if (existing.hasNode(thesisNodeId)) {
 			existing.mergeNodeAttributes(thesisNodeId, {
 				size,
 				color: isHighEmergence ? GRAPH_COLORS.thesisHighEmergence : GRAPH_COLORS.thesis,
-				label: thesis.title.length > 42 ? `${thesis.title.slice(0, 40)}...` : thesis.title,
+				label: thesisLabel,
 				emergence,
 				confidence: thesis.confidence,
 				fullTitle: thesis.title,
@@ -247,7 +251,7 @@ export function mergeGraph(
 				y,
 				size,
 				color: isHighEmergence ? GRAPH_COLORS.thesisHighEmergence : GRAPH_COLORS.thesis,
-				label: thesis.title.length > 42 ? `${thesis.title.slice(0, 40)}...` : thesis.title,
+				label: thesisLabel,
 				type: "diamond",
 				nodeType: "thesis",
 				emergence,

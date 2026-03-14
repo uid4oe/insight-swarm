@@ -51,7 +51,7 @@ interface UseSigmaParams {
 	onOpenThesis: (thesisId: string) => void;
 	onOpenFinding: (findingId: string) => void;
 	externalHighlight?: string | null;
-	summaryMode?: boolean;
+	persistentHighlight?: boolean;
 }
 
 export function useSigmaInstance({
@@ -67,7 +67,7 @@ export function useSigmaInstance({
 	onOpenThesis,
 	onOpenFinding,
 	externalHighlight,
-	summaryMode = false,
+	persistentHighlight = false,
 }: UseSigmaParams) {
 	const sigmaRef = useRef<Sigma | null>(null);
 	const graphRef = useRef<Graph | null>(null);
@@ -75,6 +75,7 @@ export function useSigmaInstance({
 	const animFrameRef = useRef<number | null>(null);
 	const resizeObserverRef = useRef<ResizeObserver | null>(null);
 	const resizeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+	const savedPositionsRef = useRef<Map<string, { x: number; y: number }> | null>(null);
 
 	const onOpenThesisRef = useRef(onOpenThesis);
 	onOpenThesisRef.current = onOpenThesis;
@@ -96,9 +97,6 @@ export function useSigmaInstance({
 
 	// Track whether we have high-emergence theses for animation
 	const hasHighEmergenceRef = useRef(false);
-
-	const summaryModeRef = useRef(summaryMode);
-	summaryModeRef.current = summaryMode;
 
 	// Animation loop function — only runs when high-emergence theses exist
 	const startAnimationLoop = useCallback(() => {
@@ -127,7 +125,7 @@ export function useSigmaInstance({
 			agentColorFn: acf,
 		} = latestDataRef.current;
 		const graph = graphRef.current;
-		const { added } = mergeGraph(graph, vf, cn, th, ap, acf);
+		const { added, removed } = mergeGraph(graph, vf, cn, th, ap, acf);
 
 		// Check for high-emergence theses to drive animation
 		let hasHigh = false;
@@ -148,12 +146,15 @@ export function useSigmaInstance({
 		}
 
 		prevDataRef.current = fingerprintStr;
-		sigmaRef.current.refresh();
 
-		// Re-fit camera when nodes are added so graph fills the viewport
-		if (added.length > 0 && sigmaRef.current) {
-			sigmaRef.current.getCamera().animatedReset({ duration: 300 });
+		// Re-fit camera when the graph changes so it fills the viewport.
+		// Reset camera state synchronously BEFORE refresh to avoid the
+		// flash of the graph rendered at the old camera position.
+		if ((added.length > 0 || removed.length > 0) && sigmaRef.current) {
+			sigmaRef.current.getCamera().setState({ ratio: 1.2, x: 0.5, y: 0.5 });
 		}
+
+		sigmaRef.current.refresh();
 	}, [fingerprintStr, startAnimationLoop]);
 
 	// One-time Sigma init
@@ -171,6 +172,10 @@ export function useSigmaInstance({
 				requestAnimationFrame(init);
 				return;
 			}
+
+			// Hide the container while Sigma initialises so the constructor's
+			// first render (which uses the default camera) is never visible.
+			container.style.visibility = "hidden";
 
 			const d = latestDataRef.current;
 			const graph = buildGraph(d.visibleFindings, d.connections, d.theses, d.agentPositions, d.agentColorFn);
@@ -190,21 +195,29 @@ export function useSigmaInstance({
 				labelSize: 12,
 				labelWeight: "500",
 				labelColor: { color: "#888" },
-				labelDensity: 0.7,
-				labelGridCellSize: 200,
-				labelRenderedSizeThreshold: 3,
+				labelDensity: 1,
+				labelGridCellSize: 60,
+				labelRenderedSizeThreshold: 2,
 				renderLabels: true,
 				renderEdgeLabels: false,
 				stagePadding: 80,
 				minEdgeThickness: 0.8,
 				zIndex: true,
-				defaultDrawNodeLabel: (context, data, settings) => {
-					if (summaryModeRef.current && data.nodeType !== "thesis" && !data.forceLabel) return;
-					drawLabelBase(context, data, settings);
-				},
+				defaultDrawNodeLabel: drawLabelBase,
 				defaultDrawNodeHover: () => {},
 				nodeReducer: (_node, data) => data,
 				edgeReducer: (_edge, data) => data,
+			});
+
+			// Set camera BEFORE the first visible paint
+			sigma.getCamera().setState({ ratio: 1.2, x: 0.5, y: 0.5 });
+			sigma.refresh();
+
+			// Reveal on the next frame — the correct camera state is now painted
+			requestAnimationFrame(() => {
+				if (!cancelled && container) {
+					container.style.visibility = "";
+				}
 			});
 
 			// ResizeObserver — debounced to avoid excessive refreshes
@@ -221,12 +234,17 @@ export function useSigmaInstance({
 			resizeObserver.observe(container);
 			resizeObserverRef.current = resizeObserver;
 
-			// Auto-fit camera to graph bounds, then settle at 1.8 ratio for breathing room
-		setTimeout(() => {
-			if (sigmaRef.current) {
-				sigmaRef.current.getCamera().setState({ ratio: 1.95, x: 0.5, y: 0.5 });
+			// Hide Sigma's hover WebGL + canvas layers so the hover node shape
+			// doesn't paint on top of our centered labels.  Sigma's internal hover
+			// detection still works (enterNode / leaveNode fire correctly).
+			// biome-ignore lint/suspicious/noExplicitAny: accessing internal sigma layers
+			const sigmaAny = sigma as any;
+			if (sigmaAny.webGLContexts?.hoverNodes?.canvas) {
+				sigmaAny.webGLContexts.hoverNodes.canvas.style.display = "none";
 			}
-		}, 50);
+			if (sigmaAny.canvasContexts?.hovers?.canvas) {
+				sigmaAny.canvasContexts.hovers.canvas.style.display = "none";
+			}
 
 			sigma.on("enterNode", ({ node }) => {
 				setHoveredNode(node);
@@ -301,6 +319,7 @@ export function useSigmaInstance({
 			}
 			resizeObserverRef.current?.disconnect();
 			resizeObserverRef.current = null;
+			savedPositionsRef.current = null;
 			if (sigmaRef.current) {
 				sigmaRef.current.kill();
 				sigmaRef.current = null;
@@ -316,11 +335,118 @@ export function useSigmaInstance({
 		const graph = graphRef.current;
 		if (!sigma || !graph) return;
 
-		const effectiveHover = hoveredNode ?? externalHighlight ?? null;
-		sigma.setSetting("nodeReducer", createNodeReducer(effectiveHover, neighbors, thesisEvidenceSets));
+		// When a thesis is persistently selected, always use it as the focus —
+		// hovering nodes within the selection shouldn't reveal unrelated nodes
+		const effectiveHover =
+			persistentHighlight && externalHighlight ? externalHighlight : (hoveredNode ?? externalHighlight ?? null);
+		const isPersistent = persistentHighlight && !!externalHighlight;
+		sigma.setSetting("nodeReducer", createNodeReducer(effectiveHover, neighbors, thesisEvidenceSets, isPersistent));
 		sigma.setSetting("edgeReducer", createEdgeReducer(effectiveHover, graph, thesisEvidenceSets));
 		sigma.refresh();
-	}, [hoveredNode, externalHighlight, neighbors, thesisEvidenceSets]);
+	}, [hoveredNode, externalHighlight, persistentHighlight, neighbors, thesisEvidenceSets]);
+
+	// Camera focus + radial layout: reposition visible nodes when persistent selection is active
+	const prevPersistentRef = useRef(false);
+	useEffect(() => {
+		const sigma = sigmaRef.current;
+		const graph = graphRef.current;
+		if (!sigma || !graph) return;
+
+		const wasPersistent = prevPersistentRef.current;
+		const isPersistent = persistentHighlight && !!externalHighlight;
+		prevPersistentRef.current = isPersistent;
+
+		if (isPersistent && externalHighlight) {
+			const evidenceSet = thesisEvidenceSets.get(externalHighlight);
+			if (!evidenceSet) return;
+
+			// Save original positions on first selection; restore them before re-laying out
+			// so bounding box is always computed from the original layout
+			if (!savedPositionsRef.current) {
+				const saved = new Map<string, { x: number; y: number }>();
+				graph.forEachNode((node, attrs) => {
+					saved.set(node, { x: attrs.x, y: attrs.y });
+				});
+				savedPositionsRef.current = saved;
+			} else {
+				// Switching theses — restore originals before computing new radial
+				for (const [node, pos] of savedPositionsRef.current) {
+					if (graph.hasNode(node)) {
+						graph.setNodeAttribute(node, "x", pos.x);
+						graph.setNodeAttribute(node, "y", pos.y);
+					}
+				}
+			}
+
+			// Compute bounding box from original positions
+			let gMinX = Number.POSITIVE_INFINITY;
+			let gMaxX = Number.NEGATIVE_INFINITY;
+			let gMinY = Number.POSITIVE_INFINITY;
+			let gMaxY = Number.NEGATIVE_INFINITY;
+			graph.forEachNode((_n, attrs) => {
+				gMinX = Math.min(gMinX, attrs.x);
+				gMaxX = Math.max(gMaxX, attrs.x);
+				gMinY = Math.min(gMinY, attrs.y);
+				gMaxY = Math.max(gMaxY, attrs.y);
+			});
+			const centerX = (gMinX + gMaxX) / 2;
+			const centerY = (gMinY + gMaxY) / 2;
+			const gRangeX = gMaxX - gMinX || 1;
+			const gRangeY = gMaxY - gMinY || 1;
+			const gRange = Math.max(gRangeX, gRangeY);
+
+			// Place thesis at center, evidence findings in a ring
+			const evidenceArr = [...evidenceSet].filter((id) => graph.hasNode(id));
+			const ringRadius = gRange * 0.25;
+			const n = evidenceArr.length;
+
+			if (graph.hasNode(externalHighlight)) {
+				graph.setNodeAttribute(externalHighlight, "x", centerX);
+				graph.setNodeAttribute(externalHighlight, "y", centerY);
+			}
+			for (let i = 0; i < n; i++) {
+				const angle = (2 * Math.PI * i) / n - Math.PI / 2;
+				graph.setNodeAttribute(evidenceArr[i], "x", centerX + Math.cos(angle) * ringRadius);
+				graph.setNodeAttribute(evidenceArr[i], "y", centerY + Math.sin(angle) * ringRadius);
+			}
+
+			// Camera: center on the thesis node's actual position after layout
+			sigma.refresh();
+
+			// Recompute bounding box after repositioning so camera targets the right spot
+			let postMinX = Number.POSITIVE_INFINITY;
+			let postMaxX = Number.NEGATIVE_INFINITY;
+			let postMinY = Number.POSITIVE_INFINITY;
+			let postMaxY = Number.NEGATIVE_INFINITY;
+			graph.forEachNode((_n, attrs) => {
+				postMinX = Math.min(postMinX, attrs.x);
+				postMaxX = Math.max(postMaxX, attrs.x);
+				postMinY = Math.min(postMinY, attrs.y);
+				postMaxY = Math.max(postMaxY, attrs.y);
+			});
+			const postRangeX = postMaxX - postMinX || 1;
+			const postRangeY = postMaxY - postMinY || 1;
+			const normX = (centerX - postMinX) / postRangeX;
+			const normY = (centerY - postMinY) / postRangeY;
+
+			const ringFrac = (ringRadius * 2) / gRange;
+			const ratio = Math.max(ringFrac * 1.4, 0.12);
+			sigma.getCamera().animate({ x: normX, y: normY, ratio }, { duration: 400 });
+		} else if (wasPersistent && !isPersistent) {
+			// Restore original positions
+			if (savedPositionsRef.current) {
+				for (const [node, pos] of savedPositionsRef.current) {
+					if (graph.hasNode(node)) {
+						graph.setNodeAttribute(node, "x", pos.x);
+						graph.setNodeAttribute(node, "y", pos.y);
+					}
+				}
+				savedPositionsRef.current = null;
+				sigma.refresh();
+			}
+			sigma.getCamera().animate({ x: 0.5, y: 0.5, ratio: 1.2 }, { duration: 400 });
+		}
+	}, [persistentHighlight, externalHighlight, thesisEvidenceSets]);
 
 	const zoomIn = useCallback(() => sigmaRef.current?.getCamera().animatedZoom({ duration: 200 }), []);
 	const zoomOut = useCallback(() => sigmaRef.current?.getCamera().animatedUnzoom({ duration: 200 }), []);

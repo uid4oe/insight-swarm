@@ -14,6 +14,7 @@ export function createNodeReducer(
 	effectiveHover: string | null,
 	neighbors: Map<string, Set<string>>,
 	thesisEvidenceSets: Map<string, Set<string>>,
+	persistent = false,
 ) {
 	// Early exit — no hover means identity reducer
 	if (!effectiveHover) {
@@ -30,10 +31,14 @@ export function createNodeReducer(
 	return (node: string, data: any) => {
 		if (isThesisFocus && evidenceSet) {
 			if (node === effectiveHover) {
-				return { ...data, zIndex: 2, forceLabel: true, size: data.size * 1.5 };
+				return { ...data, zIndex: 2, forceLabel: true };
 			}
 			if (evidenceSet.has(node)) {
-				return { ...data, zIndex: 1, forceLabel: true, size: data.size * 1.25 };
+				return { ...data, zIndex: 1, forceLabel: true };
+			}
+			// Persistent: hide everything except thesis + evidence
+			if (persistent) {
+				return { ...data, hidden: true };
 			}
 			return { ...data, color: dimmed, label: null, zIndex: 0, size: data.size * 0.8 };
 		}

@@ -5,3 +5,11 @@ dist/
 swarm.db
 data/
 .firebase/
+
+replay/
+record-run.ts
+generate-replay-index.ts
+query_db.ts
+
+.firebaserc
+firebase.json

@@ -185,6 +185,7 @@ export function buildGraph(
 	for (const f of findings) findingMap.set(f.id, f);
 
 	// ── 1. Add all finding nodes ────────────────────────────────────────────
+	let nodeIndex = 1;
 	for (const f of findings) {
 		const findingSize = Math.max(8, Math.min(8 + f.confidence * 14, 22));
 
@@ -193,7 +194,7 @@ export function buildGraph(
 			y: 0,
 			size: findingSize,
 			color: agentColorFn(f.agent_id),
-			label: f.title.length > 36 ? `${f.title.slice(0, 34)}...` : f.title,
+			label: String(nodeIndex++),
 			type: "circle",
 			nodeType: "finding",
 			agentId: f.agent_id,
@@ -267,7 +268,7 @@ export function buildGraph(
 			y: 0,
 			size,
 			color: isHighEmergence ? GRAPH_COLORS.thesisHighEmergence : GRAPH_COLORS.thesis,
-			label: thesis.title.length > 42 ? `${thesis.title.slice(0, 40)}...` : thesis.title,
+			label: `T${i + 1}`,
 			type: "diamond",
 			nodeType: "thesis",
 			emergence,

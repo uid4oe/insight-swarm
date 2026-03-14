@@ -30,6 +30,9 @@ interface AppState {
 	// Graph highlighting (driven by summary hover)
 	highlightedThesisId: string | null;
 
+	// Graph thesis filter (driven by summary click — completed view only)
+	selectedGraphThesisId: string | null;
+
 	// Actions
 	toggleSidebar: () => void;
 	setTasks: (tasks: TaskSummary[]) => void;
@@ -39,6 +42,7 @@ interface AppState {
 	setAgentMeta: (meta: AgentMeta[]) => void;
 	setError: (error: string | null) => void;
 	setHighlightedThesis: (thesisId: string | null) => void;
+	setSelectedGraphThesis: (thesisId: string | null) => void;
 	openThesis: (taskId: string, thesisId: string) => void;
 	closeThesis: () => void;
 	openFinding: (finding: Finding, allFindings: Finding[], allConnections: Connection[]) => void;
@@ -64,6 +68,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 	findingHistory: [],
 	sidebarCollapsed: false,
 	highlightedThesisId: null,
+	selectedGraphThesisId: null,
 
 	toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
 	setTasks: (tasks) => set({ tasks }),
@@ -76,6 +81,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 			findingOverlay: null,
 			findingHistory: [],
 			error: null,
+			selectedGraphThesisId: null,
 		});
 		pushTaskURL(taskId);
 	},
@@ -100,6 +106,10 @@ export const useAppStore = create<AppState>((set, get) => ({
 	setError: (error) => set({ error }),
 
 	setHighlightedThesis: (thesisId) => set({ highlightedThesisId: thesisId }),
+	setSelectedGraphThesis: (thesisId) =>
+		set((s) => ({
+			selectedGraphThesisId: s.selectedGraphThesisId === thesisId ? null : thesisId,
+		})),
 	openThesis: (taskId, thesisId) =>
 		set({ findingOverlay: null, findingHistory: [], thesisOverlay: { taskId, thesisId } }),
 	closeThesis: () => set({ thesisOverlay: null }),
