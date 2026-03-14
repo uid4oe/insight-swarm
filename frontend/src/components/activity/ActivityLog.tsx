@@ -27,16 +27,28 @@ export function ActivityLog({ activity, agentMeta = [], className = "", compact 
 	}, [activity]);
 
 	const roundGroups = useMemo(() => {
-		const groups: { round: number; entries: ActivityEntry[] }[] = [];
-		let current: { round: number; entries: ActivityEntry[] } | null = null;
+		// Group entries by round
+		const byRound = new Map<number, ActivityEntry[]>();
 		for (const entry of feed) {
-			if (!current || current.round !== entry.round) {
-				current = { round: entry.round, entries: [] };
-				groups.push(current);
-			}
-			current.entries.push(entry);
+			const arr = byRound.get(entry.round);
+			if (arr) arr.push(entry);
+			else byRound.set(entry.round, [entry]);
 		}
-		return groups;
+
+		// Sort rounds descending (newest round first)
+		const rounds = [...byRound.keys()].sort((a, b) => b - a);
+
+		return rounds.map((round) => {
+			const entries = byRound.get(round)!;
+			// Sort entries within each round chronologically (oldest first)
+			entries.sort((a, b) => {
+				const timeA = new Date(a.created_at).getTime();
+				const timeB = new Date(b.created_at).getTime();
+				if (timeA !== timeB) return timeA - timeB;
+				return (a.id ?? 0) - (b.id ?? 0);
+			});
+			return { round, entries };
+		});
 	}, [feed]);
 
 	const totals = useMemo(() => {

@@ -1,46 +1,23 @@
 import type Graph from "graphology";
-import forceAtlas2 from "graphology-layout-forceatlas2";
 import { GRAPH_COLORS, RELATIONSHIP_COLORS } from "../../lib/constants";
 import type { Connection, Finding, InvestmentThesis } from "../../lib/types";
 
-// ── ForceAtlas2 settings (must match graphBuilder.ts) ───────────────────────
+// ── Post-layout: push apart overlapping nodes (no global re-scaling) ────────
 
-const FA2_ITERATIONS = 400; // fewer iterations for incremental merges
-const FA2_SETTINGS = {
-	gravity: 0.001,
-	scalingRatio: 600,
-	strongGravityMode: false,
-	barnesHutOptimize: true,
-	barnesHutTheta: 0.4,
-	slowDown: 10,
-	adjustSizes: true,
-	linLogMode: true,
-	outboundAttractionDistribution: true,
-	edgeWeightInfluence: 1.5,
-};
-
-// ── Post-layout: minimum spacing (must match graphBuilder.ts) ───────────────
-
-const LAYOUT_SCALE = 2.5;
 const MIN_NODE_DISTANCE = 250;
-const SPREAD_PASSES = 12;
+const SPREAD_PASSES = 8;
 
-function spreadLayout(graph: Graph): void {
+/**
+ * Push apart any nodes closer than MIN_NODE_DISTANCE.
+ * Unlike buildGraph's spreadLayout, this does NOT re-scale the entire layout —
+ * existing positions are stable; only overlapping pairs get nudged.
+ */
+function pushApart(graph: Graph): void {
 	const nodes: { id: string; x: number; y: number; isThesis: boolean }[] = [];
 	graph.forEachNode((id, attrs) => {
 		nodes.push({ id, x: attrs.x, y: attrs.y, isThesis: attrs.nodeType === "thesis" });
 	});
-	if (nodes.length === 0) return;
-
-	let cx = 0;
-	let cy = 0;
-	for (const n of nodes) { cx += n.x; cy += n.y; }
-	cx /= nodes.length;
-	cy /= nodes.length;
-	for (const n of nodes) {
-		n.x = cx + (n.x - cx) * LAYOUT_SCALE;
-		n.y = cy + (n.y - cy) * LAYOUT_SCALE;
-	}
+	if (nodes.length < 2) return;
 
 	for (let pass = 0; pass < SPREAD_PASSES; pass++) {
 		for (let i = 0; i < nodes.length; i++) {
@@ -153,18 +130,68 @@ export function mergeGraph(
 				tags: f.tags,
 			});
 		} else {
-			let x = (Math.random() - 0.5) * 800;
-			let y = (Math.random() - 0.5) * 800;
+			// Place near a connected neighbor if one exists, otherwise near
+			// same-agent peers, otherwise at a random orbit around the centroid
+			let x = 0;
+			let y = 0;
+			let placed = false;
 
+			// Try: place near a connected neighbor
 			for (const c of connections) {
 				const neighborId =
 					c.from_finding_id === f.id ? c.to_finding_id :
 					c.to_finding_id === f.id ? c.from_finding_id : null;
 				if (neighborId && existing.hasNode(neighborId)) {
-					x = existing.getNodeAttribute(neighborId, "x") + (Math.random() - 0.5) * 200;
-					y = existing.getNodeAttribute(neighborId, "y") + (Math.random() - 0.5) * 200;
+					const jitter = 300 + Math.random() * 300;
+					const angle = Math.random() * Math.PI * 2;
+					x = existing.getNodeAttribute(neighborId, "x") + Math.cos(angle) * jitter;
+					y = existing.getNodeAttribute(neighborId, "y") + Math.sin(angle) * jitter;
+					placed = true;
 					break;
 				}
+			}
+
+			// Fallback: place near same-agent peers
+			if (!placed) {
+				let cx = 0;
+				let cy = 0;
+				let peerCount = 0;
+				existing.forEachNode((_n, attrs) => {
+					if (attrs.agentId === f.agent_id) {
+						cx += attrs.x;
+						cy += attrs.y;
+						peerCount++;
+					}
+				});
+				if (peerCount > 0) {
+					cx /= peerCount;
+					cy /= peerCount;
+					const jitter = 400 + Math.random() * 400;
+					const angle = Math.random() * Math.PI * 2;
+					x = cx + Math.cos(angle) * jitter;
+					y = cy + Math.sin(angle) * jitter;
+					placed = true;
+				}
+			}
+
+			// Fallback: random position around graph centroid
+			if (!placed) {
+				let cx = 0;
+				let cy = 0;
+				let count = 0;
+				existing.forEachNode((_n, attrs) => {
+					cx += attrs.x;
+					cy += attrs.y;
+					count++;
+				});
+				if (count > 0) {
+					cx /= count;
+					cy /= count;
+				}
+				const r = 800 + Math.random() * 600;
+				const angle = Math.random() * Math.PI * 2;
+				x = cx + Math.cos(angle) * r;
+				y = cy + Math.sin(angle) * r;
 			}
 
 			existing.addNode(f.id, {
@@ -320,10 +347,9 @@ export function mergeGraph(
 		}
 	}
 
-	// Run FA2 + spacing enforcement for new nodes
-	if (added.length > 0 && existing.order > 0) {
-		forceAtlas2.assign(existing, { iterations: FA2_ITERATIONS, settings: FA2_SETTINGS });
-		spreadLayout(existing);
+	// Push apart overlapping nodes — no FA2 re-layout, just nudge overlaps
+	if (added.length > 0 && existing.order > 1) {
+		pushApart(existing);
 	}
 
 	return { added, removed };

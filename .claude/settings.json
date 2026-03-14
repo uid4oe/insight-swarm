@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pnpm install)",
+      "Bash(pnpm dev)",
+      "Bash(pnpm dev:frontend)",
+      "Bash(pnpm dev:full)",
+      "Bash(pnpm infra)",
+      "Bash(pnpm db:init)",
+      "Bash(pnpm db:reset)",
+      "Bash(pnpm typecheck)",
+      "Bash(pnpm lint)",
+      "Bash(pnpm check)",
+      "Bash(pnpm check:fix)",
+      "Bash(pnpm format)",
+      "Bash(pnpm build)",
+      "Bash(pnpm test*)",
+      "Bash(docker compose*)",
+      "Bash(make *)",
+      "Bash(curl *localhost*)"
+    ]
+  }
+}

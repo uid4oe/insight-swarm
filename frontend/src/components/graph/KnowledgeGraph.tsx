@@ -79,7 +79,7 @@ export function KnowledgeGraph({
 	selectedGraphThesisId: selectedGraphThesisIdProp,
 }: Props) {
 	const containerRef = useRef<HTMLDivElement>(null);
-	const [connectedOnly, setConnectedOnly] = useState(true);
+	const [connectedOnly, setConnectedOnly] = useState(false);
 	const storeHighlightedThesisId = useAppStore((s) => s.highlightedThesisId);
 	const storeSelectedGraphThesisId = useAppStore((s) => s.selectedGraphThesisId);
 	// Props override store values (used by replay which has no store context)
