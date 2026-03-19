@@ -32,24 +32,15 @@ Insight Swarm removes the orchestrator entirely and replaces it with a **shared 
 
 The result: 2-5 agents running for 2-12 minutes typically produce 17-28 findings, 11-28 connections, and 6-8 theses — with genuine disagreements, contested conclusions, and evidence chains you can trace back through the graph.
 
-```
-                        ┌─────────────────────────────────┐
-                        │     Shared Knowledge Graph      │
-                        │   (PostgreSQL + pgvector)       │
-                        │                                 │
-                        │   findings ← connections →      │
-                        │   theses  ← votes → reactions   │
-                        └──┬──────────┬──────────┬────────┘
-                           │          │          │
-                    ┌──────┴──┐ ┌─────┴────┐ ┌───┴──────┐
-                    │ Agent A │ │ Agent B  │ │ Agent C  │
-                    │ (reads, │ │ (reads,  │ │ (reads,  │
-                    │ writes, │ │ writes,  │ │ writes,  │
-                    │ reacts) │ │ reacts)  │ │ reacts)  │
-                    └─────────┘ └──────────┘ └──────────┘
-                         ↑           ↑            ↑
-                         └───── RabbitMQ events ──┘
-                              (peer awareness)
+```mermaid
+graph TD
+    KG[Shared Knowledge Graph<br>PostgreSQL + pgvector]
+    KG --- |findings, connections,<br>theses, votes, reactions| A[Agent A<br>reads, writes, reacts]
+    KG --- |findings, connections,<br>theses, votes, reactions| B[Agent B<br>reads, writes, reacts]
+    KG --- |findings, connections,<br>theses, votes, reactions| C[Agent C<br>reads, writes, reacts]
+    MQ[RabbitMQ Events<br>peer awareness] -.-> A
+    MQ -.-> B
+    MQ -.-> C
 ```
 
 ---
@@ -60,26 +51,20 @@ The result: 2-5 agents running for 2-12 minutes typically produce 17-28 findings
 
 Each agent runs an independent round loop. No global synchronization barrier, no turn-taking, no waiting for instructions. Agents advance at their own pace:
 
+```mermaid
+graph LR
+    R[React to peers] --> W[Research & write]
+    W --> C[Connect findings]
+    C --> S[Synthesize theses]
+    S --> V[Vote on theses]
+    V --> A[Advance round]
+    A -.->|next round| R
+
+    style R fill:#f9f,stroke:#333
+    style A fill:#bbf,stroke:#333
 ```
-┌──────────────────────────────────────────────────────────┐
-│                    Per-Agent Round                        │
-│                                                          │
-│  1. React to peers    respond to other agents' findings  │
-│  2. Research & write  create findings with confidence,   │
-│                       tags, and vector embeddings         │
-│  3. Connect           link findings across agents         │
-│                       (supports / contradicts /           │
-│                        enables / amplifies)               │
-│  4. Synthesize        propose theses requiring            │
-│                       evidence from 2+ agents             │
-│  5. Vote              support or challenge theses         │
-│  6. Advance           move to next round independently   │
-│                                                          │
-│  Dynamic prompts inject: knowledge graph context,        │
-│  semantic neighbors, tension detection, groupthink       │
-│  warnings, and novelty pressure                          │
-└──────────────────────────────────────────────────────────┘
-```
+
+> Dynamic prompts inject: knowledge graph context, semantic neighbors, tension detection, groupthink warnings, and novelty pressure.
 
 ### The Knowledge Graph
 
@@ -181,31 +166,18 @@ curl -s -X POST http://localhost:3000/api/tasks/<id>/followup \
 
 ## Architecture
 
-```
-                    ┌──────────────────────────┐
-                    │     Frontend (React)      │
-                    │  Prompt → Graph → Summary │
-                    └────────────┬─────────────┘
-                                 │ HTTP + SSE
-                    ┌────────────▼─────────────┐
-                    │      Hono API Server      │
-                    └─────┬──────────────┬─────┘
-                          │              │
-                ┌─────────▼──────┐ ┌─────▼─────────────┐
-                │   RabbitMQ     │ │    PostgreSQL      │
-                │  Task queue    │ │  + pgvector        │
-                │  Event bus     │ │  Knowledge graph   │
-                └─────────┬──────┘ └─────▲─────────────┘
-                          │              │
-                ┌─────────▼──────────────┤
-                │    Swarm Runner        │
-                │  (launch + lifecycle)  │
-                └──┬─────┬─────┬────────┘
-                   │     │     │
-              ┌────▼┐ ┌──▼──┐ ┌▼────┐
-              │Agent│ │Agent│ │Agent│    2-5 concurrent
-              │ loop│ │ loop│ │ loop│    autonomous agents
-              └─────┘ └─────┘ └─────┘
+```mermaid
+graph TD
+    UI[Frontend - React<br>Prompt → Graph → Summary] -->|HTTP + SSE| API[Hono API Server]
+    API --> MQ[RabbitMQ<br>Task queue + Event bus]
+    API --> PG[PostgreSQL + pgvector<br>Knowledge graph]
+    MQ --> SR[Swarm Runner<br>launch + lifecycle]
+    SR --> A1[Agent loop]
+    SR --> A2[Agent loop]
+    SR --> A3[Agent loop]
+    A1 --> PG
+    A2 --> PG
+    A3 --> PG
 ```
 
 **The Swarm Runner is not an orchestrator.** It launches agents and manages lifecycle (startup, shutdown, crash recovery). It never reads findings, never directs work, never assigns subtasks, never merges outputs.
