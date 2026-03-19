@@ -34,13 +34,18 @@ The result: 2-5 agents running for 2-12 minutes typically produce 17-28 findings
 
 ```mermaid
 graph TD
-    KG[Shared Knowledge Graph<br>PostgreSQL + pgvector]
-    KG --- |findings, connections,<br>theses, votes, reactions| A[Agent A<br>reads, writes, reacts]
-    KG --- |findings, connections,<br>theses, votes, reactions| B[Agent B<br>reads, writes, reacts]
-    KG --- |findings, connections,<br>theses, votes, reactions| C[Agent C<br>reads, writes, reacts]
-    MQ[RabbitMQ Events<br>peer awareness] -.-> A
-    MQ -.-> B
-    MQ -.-> C
+    KG["Knowledge Graph (PostgreSQL + pgvector)\nfindings · connections · theses · votes"]
+    A["Financial Agent"]
+    B["Operational Agent"]
+    C["Market Agent"]
+
+    KG --- A
+    KG --- B
+    KG --- C
+
+    MQ["RabbitMQ Events"] -.->|peer awareness| A
+    MQ -.->|peer awareness| B
+    MQ -.->|peer awareness| C
 ```
 
 ---
@@ -53,15 +58,12 @@ Each agent runs an independent round loop. No global synchronization barrier, no
 
 ```mermaid
 graph LR
-    R[React to peers] --> W[Research & write]
-    W --> C[Connect findings]
-    C --> S[Synthesize theses]
-    S --> V[Vote on theses]
-    V --> A[Advance round]
+    R["React to peers"] --> W["Research & write findings"]
+    W --> C["Connect across agents"]
+    C --> S["Synthesize theses"]
+    S --> V["Vote on theses"]
+    V --> A["Advance round"]
     A -.->|next round| R
-
-    style R fill:#f9f,stroke:#333
-    style A fill:#bbf,stroke:#333
 ```
 
 > Dynamic prompts inject: knowledge graph context, semantic neighbors, tension detection, groupthink warnings, and novelty pressure.
@@ -168,13 +170,13 @@ curl -s -X POST http://localhost:3000/api/tasks/<id>/followup \
 
 ```mermaid
 graph TD
-    UI[Frontend - React<br>Prompt → Graph → Summary] -->|HTTP + SSE| API[Hono API Server]
-    API --> MQ[RabbitMQ<br>Task queue + Event bus]
-    API --> PG[PostgreSQL + pgvector<br>Knowledge graph]
-    MQ --> SR[Swarm Runner<br>launch + lifecycle]
-    SR --> A1[Agent loop]
-    SR --> A2[Agent loop]
-    SR --> A3[Agent loop]
+    UI["React Frontend"] -->|HTTP + SSE| API["Hono API Server"]
+    API --> MQ["RabbitMQ"]
+    API --> PG["PostgreSQL + pgvector"]
+    MQ --> SR["Swarm Runner"]
+    SR --> A1["Financial Agent"]
+    SR --> A2["Operational Agent"]
+    SR --> A3["Market Agent"]
     A1 --> PG
     A2 --> PG
     A3 --> PG
